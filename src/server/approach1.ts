@@ -3,10 +3,10 @@
  * The browser sends an SDP offer, we relay it to OpenAI and return the answer.
  */
 
-const SYSTEM_PROMPT = `You are a helpful customer support agent. Be concise and friendly.
+const DEFAULT_PROMPT = `You are a helpful customer support agent. Be concise and friendly.
 Ask clarifying questions when needed. Keep responses under 2-3 sentences.`;
 
-export async function createRealtimeSession(apiKey: string, sdpOffer: string): Promise<string> {
+export async function createRealtimeSession(apiKey: string, sdpOffer: string, systemPrompt?: string): Promise<string> {
 	const resp = await fetch('https://api.openai.com/v1/realtime/sessions', {
 		method: 'POST',
 		headers: {
@@ -16,7 +16,7 @@ export async function createRealtimeSession(apiKey: string, sdpOffer: string): P
 		body: JSON.stringify({
 			model: 'gpt-4o-realtime-preview',
 			voice: 'verse',
-			instructions: SYSTEM_PROMPT,
+			instructions: systemPrompt || DEFAULT_PROMPT,
 			input_audio_transcription: { model: 'whisper-1' },
 			turn_detection: { type: 'server_vad' }
 		})

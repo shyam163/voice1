@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { base } from '$app/paths';
+
 	const approaches = [
 		{
-			href: '/approach-1',
+			href: `${base}/approach-1`,
 			title: 'Speech-to-Speech',
 			subtitle: 'OpenAI Realtime API',
 			latency: '200–500ms',
@@ -9,7 +11,7 @@
 			desc: 'WebRTC connection to GPT-4o-realtime. Lowest latency, built-in VAD. LLM not swappable.'
 		},
 		{
-			href: '/approach-2',
+			href: `${base}/approach-2`,
 			title: 'STT → LLM → TTS Pipeline',
 			subtitle: 'Deepgram + LLM + Cartesia',
 			latency: '800ms–2s',
@@ -17,7 +19,7 @@
 			desc: 'Maximum flexibility. Swap any component. Deepgram STT → Claude/GPT/Groq → Cartesia TTS.'
 		},
 		{
-			href: '/approach-3',
+			href: `${base}/approach-3`,
 			title: 'All-in-One Platform',
 			subtitle: 'Voice Agents',
 			latency: '400–800ms',
