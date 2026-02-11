@@ -9,16 +9,23 @@ export interface CartesiaOptions {
 	voiceId?: string;
 }
 
+export interface GoogleTTSOptions {
+	voiceName?: string;
+	languageCode?: string;
+}
+
 export interface PipelineConfig {
 	deepgramKey: string;
 	groqKey?: string;
 	anthropicKey?: string;
 	openaiKey?: string;
 	cartesiaKey: string;
+	googleTtsKey?: string;
 	llmProvider: 'groq' | 'anthropic' | 'openai';
 	ttsProvider?: string;
 	useCartesiaEmotions?: boolean;
 	cartesiaOptions?: CartesiaOptions;
+	googleTtsOptions?: GoogleTTSOptions;
 	systemPrompt?: string;
 	cartesiaEmotionPrompt?: string;
 }
@@ -80,7 +87,9 @@ export async function* streamLLM(
 			body: JSON.stringify({
 				model: 'llama-3.3-70b-versatile',
 				messages: [systemMsg, ...messages],
-				stream: true
+				stream: true,
+				frequency_penalty: 0.7,
+				presence_penalty: 0.5
 			})
 		});
 		if (!resp.ok) throw new Error(`Groq error: ${resp.status}`);
@@ -94,7 +103,7 @@ export async function* streamLLM(
 				'Content-Type': 'application/json'
 			},
 			body: JSON.stringify({
-				model: 'claude-sonnet-4-5-20250929',
+				model: 'claude-haiku-4-5-20251001',
 				max_tokens: 256,
 				system: systemMsg.content,
 				messages: messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
@@ -113,7 +122,9 @@ export async function* streamLLM(
 			body: JSON.stringify({
 				model: 'gpt-4o-mini',
 				messages: [systemMsg, ...messages],
-				stream: true
+				stream: true,
+				frequency_penalty: 0.7,
+				presence_penalty: 0.5
 			})
 		});
 		if (!resp.ok) throw new Error(`OpenAI error: ${resp.status}`);
@@ -168,12 +179,14 @@ async function* parseAnthropicSSE(body: ReadableStream<Uint8Array>): AsyncGenera
 	}
 }
 
-export type TTSProvider = 'deepgram' | 'openai' | 'cartesia';
+export type TTSProvider = 'deepgram' | 'openai' | 'cartesia' | 'google' | 'qwen3';
 
 export interface TTSKeys {
 	deepgramKey?: string;
 	openaiKey?: string;
 	cartesiaKey?: string;
+	googleTtsKey?: string;
+	qwen3Url?: string;
 }
 
 /** Synthesize speech using the selected TTS provider. Returns MP3/WAV audio. */
@@ -182,7 +195,8 @@ export async function synthesizeSpeech(
 	keys: TTSKeys,
 	text: string,
 	cartesiaOptions?: CartesiaOptions,
-	deepgramVoice?: string
+	deepgramVoice?: string,
+	googleTtsOptions?: GoogleTTSOptions
 ): Promise<{ audio: ArrayBuffer; format: 'mp3' | 'wav' }> {
 	if (provider === 'deepgram') {
 		if (!keys.deepgramKey) throw new Error('Deepgram key not configured');
@@ -251,6 +265,41 @@ export async function synthesizeSpeech(
 		});
 		if (!resp.ok) throw new Error(`Cartesia TTS: ${resp.status}`);
 		return { audio: await resp.arrayBuffer(), format: 'wav' };
+	}
+
+	if (provider === 'qwen3') {
+		if (!keys.qwen3Url) throw new Error('Qwen3 Colab URL not configured');
+		const url = keys.qwen3Url.replace(/\/+$/, '') + '/tts';
+		const resp = await fetch(url, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ text, language: 'English' })
+		});
+		if (!resp.ok) throw new Error(`Qwen3 TTS: ${resp.status} ${await resp.text().catch(() => '')}`);
+		return { audio: await resp.arrayBuffer(), format: 'wav' };
+	}
+
+	if (provider === 'google') {
+		if (!keys.googleTtsKey) throw new Error('Google TTS key not configured');
+		const voiceName = googleTtsOptions?.voiceName || 'en-IN-Standard-A';
+		const languageCode = googleTtsOptions?.languageCode || voiceName.slice(0, 5); // e.g. "en-IN"
+		const resp = await fetch(
+			`https://texttospeech.googleapis.com/v1/text:synthesize?key=${keys.googleTtsKey}`,
+			{
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					input: { text },
+					voice: { languageCode, name: voiceName },
+					audioConfig: { audioEncoding: 'MP3', sampleRateHertz: 24000 }
+				})
+			}
+		);
+		if (!resp.ok) throw new Error(`Google TTS: ${resp.status}`);
+		const { audioContent } = await resp.json();
+		// audioContent is base64 — decode to ArrayBuffer
+		const binary = Buffer.from(audioContent, 'base64');
+		return { audio: binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength), format: 'mp3' };
 	}
 
 	throw new Error(`Unknown TTS provider: ${provider}`);

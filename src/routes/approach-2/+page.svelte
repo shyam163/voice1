@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import VoiceButton from '$lib/components/VoiceButton.svelte';
 	import ChatLog from '$lib/components/ChatLog.svelte';
 	import LatencyBadge from '$lib/components/LatencyBadge.svelte';
@@ -19,14 +20,16 @@
 	let speechEndTime = 0;
 	let llmProvider = $state<'groq' | 'anthropic' | 'openai'>('groq');
 	let conversationHistory: { role: string; content: string }[] = [];
-	let sttProvider = $state<'deepgram-nova3' | 'deepgram-flux' | 'cartesia' | 'openai' | 'browser'>('deepgram-nova3');
-	let ttsProvider = $state<'deepgram' | 'openai' | 'cartesia' | 'browser'>('cartesia');
+	let sttProvider = $state<'deepgram-nova3' | 'cartesia' | 'openai' | 'browser'>('deepgram-nova3');
+	let ttsProvider = $state<'deepgram' | 'openai' | 'cartesia' | 'google' | 'qwen3' | 'browser'>('cartesia');
+	let qwen3Url = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('qwen3Url') || '' : '');
 	let browserRecognition: any = null;
 	let whisperChunks: Int16Array[] = [];
 	let whisperTimer: ReturnType<typeof setInterval> | null = null;
 	let volume = $state(0.8);
 	let logs: string[] = $state([]);
 	let showLogs = $state(true);
+	let processing = $state(false);
 
 	// Settings panel state
 	let showSettings = $state(true);
@@ -67,6 +70,40 @@ Style guidelines:
 
 	let deepgramVoice = $state('aura-2-asteria-en');
 
+	const GOOGLE_VOICES = [
+		{ id: 'en-IN-Standard-A', name: 'Standard A (Female)' },
+		{ id: 'en-IN-Standard-B', name: 'Standard B (Male)' },
+		{ id: 'en-IN-Standard-C', name: 'Standard C (Male)' },
+		{ id: 'en-IN-Standard-D', name: 'Standard D (Female)' },
+		{ id: 'en-IN-Standard-E', name: 'Standard E (Female)' },
+		{ id: 'en-IN-Standard-F', name: 'Standard F (Male)' },
+		{ id: 'en-IN-Wavenet-A', name: 'WaveNet A (Female)' },
+		{ id: 'en-IN-Wavenet-B', name: 'WaveNet B (Male)' },
+		{ id: 'en-IN-Wavenet-C', name: 'WaveNet C (Male)' },
+		{ id: 'en-IN-Wavenet-D', name: 'WaveNet D (Female)' },
+		{ id: 'en-IN-Wavenet-E', name: 'WaveNet E (Female)' },
+		{ id: 'en-IN-Wavenet-F', name: 'WaveNet F (Male)' },
+		{ id: 'en-IN-Neural2-A', name: 'Neural2 A (Female)' },
+		{ id: 'en-IN-Neural2-B', name: 'Neural2 B (Male)' },
+		{ id: 'en-IN-Neural2-C', name: 'Neural2 C (Male)' },
+		{ id: 'en-IN-Neural2-D', name: 'Neural2 D (Female)' },
+	] as const;
+	let googleVoice = $state('en-IN-Standard-A');
+
+	const CARTESIA_VOICES = [
+		{ id: '95d51f79-c397-46f9-b49a-23763d3eaa2d', name: 'Arushi' },
+		{ id: 'faf0731e-dfb9-4cfc-8119-259a79b27e12', name: 'Riya' },
+		{ id: 'bec003e2-3cb3-429c-8468-206a393c67ad', name: 'Parvati' },
+		{ id: '002622d8-19d0-4567-a16a-f99c7397c062', name: 'Huda' },
+		{ id: 'fc923f89-1de5-4ddf-b93c-6da2ba63428a', name: 'Nour' },
+		{ id: '56e35e2d-6eb6-4226-ab8b-9776515a7094', name: 'Kavitha' },
+		{ id: '47f3bbb1-e98f-4e0c-92c5-5f0325e1e206', name: 'Neha' },
+		{ id: '25d2c432-139c-4035-bfd6-9baaabcdd006', name: 'Kavya' },
+		{ id: '07bc462a-c644-49f1-baf7-82d5599131be', name: 'Sindhu' },
+		{ id: '28ca2041-5dda-42df-8123-f58ea9c3da00', name: 'Palak' },
+	] as const;
+	let cartesiaVoice = $state('95d51f79-c397-46f9-b49a-23763d3eaa2d');
+
 	const CARTESIA_EMOTIONS = ['excited', 'happy', 'enthusiastic', 'elated', 'euphoric', 'triumphant', 'amazed', 'surprised', 'flirtatious', 'joking', 'peaceful', 'serene', 'calm', 'grateful', 'affectionate', 'proud', 'confident', 'determined', 'curious', 'anticipation', 'mysterious', 'contemplative', 'wistful', 'nostalgic', 'content', 'angry', 'sad', 'scared', 'sarcastic'] as const;
 	let selectedEmotions = $state<Record<string, boolean>>({});
 	let emotionIntensities = $state<Record<string, string>>({});
@@ -98,13 +135,16 @@ Style guidelines:
 		});
 	});
 
-	async function startDeepgramSTT(model: 'nova-3' | 'flux-general-en') {
+	$effect(() => {
+		if (qwen3Url !== undefined) localStorage.setItem('qwen3Url', qwen3Url);
+	});
+
+	async function startDeepgramSTT(model: string = 'nova-3') {
 		log(`Connecting to Deepgram STT (${model})...`);
-		const resp = await fetch('/api/approach2/stt-key');
+		const resp = await fetch(`${base}/api/approach2/stt-key`);
 		const { key } = await resp.json();
 
-		const apiVersion = model === 'flux-general-en' ? 'v2' : 'v1';
-		const url = `wss://api.deepgram.com/${apiVersion}/listen?encoding=linear16&sample_rate=16000&channels=1&interim_results=true&model=${model}`;
+		const url = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&channels=1&interim_results=true&model=${model}`;
 		sttWs = new WebSocket(url, ['token', key]);
 
 		sttWs.onmessage = (e) => {
@@ -133,7 +173,7 @@ Style guidelines:
 
 	async function startCartesiaSTT() {
 		log('Connecting to Cartesia Ink STT...');
-		const resp = await fetch('/api/approach2/cartesia-stt-key');
+		const resp = await fetch(`${base}/api/approach2/cartesia-stt-key`);
 		const { token } = await resp.json();
 
 		const params = new URLSearchParams({
@@ -192,7 +232,7 @@ Style guidelines:
 			const b64 = btoa(binary);
 
 			try {
-				const resp = await fetch('/api/approach2/stt-openai', {
+				const resp = await fetch(`${base}/api/approach2/stt-openai`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ audio: b64, sampleRate: 16000 })
@@ -274,8 +314,7 @@ Style guidelines:
 				if (sttProvider === 'cartesia') {
 					await startCartesiaSTT();
 				} else {
-					const model = sttProvider === 'deepgram-flux' ? 'flux-general-en' : 'nova-3';
-					await startDeepgramSTT(model);
+					await startDeepgramSTT('nova-3');
 				}
 				micHandle = await startMic((pcm) => {
 					vad.process(pcm);
@@ -295,6 +334,11 @@ Style guidelines:
 	}
 
 	async function handleUserSpeech(text: string) {
+		if (processing) {
+			log(`WARN: Skipping speech while processing: "${text.slice(0, 40)}"`);
+			return;
+		}
+		processing = true;
 		chatStore.addMessage('user', text);
 		conversationHistory.push({ role: 'user', content: text });
 		speechEndTime = speechEndTime || Date.now();
@@ -305,7 +349,7 @@ Style guidelines:
 		const effectiveTts = ttsProvider === 'browser' ? 'none' : ttsProvider;
 
 		try {
-			const resp = await fetch('/api/approach2', {
+			const resp = await fetch(`${base}/api/approach2`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -319,8 +363,14 @@ Style guidelines:
 					cartesiaOptions: ttsProvider === 'cartesia' ? {
 						speed: cartesiaSpeed,
 						emotion: getCartesiaEmotionArray(),
+						voiceId: cartesiaVoice,
 					} : undefined,
 					deepgramVoice: ttsProvider === 'deepgram' ? deepgramVoice : undefined,
+					googleTtsOptions: ttsProvider === 'google' ? {
+						voiceName: googleVoice,
+						languageCode: 'en-IN',
+					} : undefined,
+					qwen3Url: ttsProvider === 'qwen3' ? qwen3Url : undefined,
 					sttProvider
 				})
 			});
@@ -328,6 +378,7 @@ Style guidelines:
 			if (!resp.ok) {
 				log(`ERROR: API returned ${resp.status}`);
 				statusText = `Error: ${resp.status}`;
+				processing = false;
 				return;
 			}
 
@@ -384,11 +435,6 @@ Style guidelines:
 					} else if (msg.type === 'done') {
 						log(`Done. Full response: ${msg.data.length} chars`);
 						conversationHistory.push({ role: 'assistant', content: msg.data });
-						if (ttsProvider === 'browser') {
-							const utterance = new SpeechSynthesisUtterance(msg.data);
-							utterance.volume = volume;
-							speechSynthesis.speak(utterance);
-						}
 					} else if (msg.type === 'timing') {
 						const t = JSON.parse(msg.data);
 						log(`⏱ LLM first: ${t.llmFirstMs}ms | LLM total: ${t.llmMs}ms | TTS: ${t.ttsMs}ms | Total: ${t.totalMs}ms`);
@@ -401,6 +447,8 @@ Style guidelines:
 		} catch (err: any) {
 			log(`ERROR: ${err.message}`);
 			statusText = `Error: ${err.message}`;
+		} finally {
+			processing = false;
 		}
 	}
 
@@ -513,7 +561,6 @@ Style guidelines:
 							<span>STT</span>
 							<select bind:value={sttProvider} disabled={isListening}>
 								<option value="deepgram-nova3">Deepgram Nova-3</option>
-								<option value="deepgram-flux">Deepgram Flux</option>
 								<option value="cartesia">Cartesia Ink</option>
 								<option value="openai">OpenAI Whisper</option>
 								<option value="browser">Browser (free)</option>
@@ -525,6 +572,8 @@ Style guidelines:
 								<option value="deepgram">Deepgram</option>
 								<option value="openai">OpenAI</option>
 								<option value="cartesia">Cartesia</option>
+								<option value="google">Google (en-IN)</option>
+								<option value="qwen3">Qwen3 (Colab)</option>
 								<option value="browser">Browser (free)</option>
 							</select>
 						</label>
@@ -550,6 +599,32 @@ Style guidelines:
 								</select>
 							</label>
 						{/if}
+						{#if ttsProvider === 'cartesia'}
+							<label class="setting-row">
+								<span>Voice</span>
+								<select bind:value={cartesiaVoice} disabled={isListening}>
+									{#each CARTESIA_VOICES as v}
+										<option value={v.id}>{v.name}</option>
+									{/each}
+								</select>
+							</label>
+						{/if}
+						{#if ttsProvider === 'google'}
+							<label class="setting-row">
+								<span>Voice</span>
+								<select bind:value={googleVoice} disabled={isListening}>
+									{#each GOOGLE_VOICES as v}
+										<option value={v.id}>{v.name}</option>
+									{/each}
+								</select>
+							</label>
+						{/if}
+						{#if ttsProvider === 'qwen3'}
+							<label class="setting-row" style="flex-direction:column;align-items:stretch">
+								<span>Colab ngrok URL</span>
+								<input type="text" class="url-input" bind:value={qwen3Url} placeholder="https://xxxx.ngrok-free.app" />
+							</label>
+						{/if}
 						<label class="setting-row">
 							<span>Volume</span>
 							<div class="slider-row">
@@ -565,7 +640,7 @@ Style guidelines:
 
 	<div class="main">
 		<header>
-			<a href="/">← Back</a>
+			<a href="{base}/">← Back</a>
 			<h1>Approach 2: STT → LLM → TTS Pipeline</h1>
 			<p class="sub">Quantum Automata Voice Agent</p>
 			<LatencyBadge {latencyMs} />
@@ -818,6 +893,22 @@ Style guidelines:
 	.chip:disabled {
 		cursor: default;
 		opacity: 0.5;
+	}
+
+	/* ── URL input ── */
+	.url-input {
+		width: 100%;
+		background: #1a1a2e;
+		color: #e0e0e0;
+		border: 1px solid #333;
+		border-radius: 4px;
+		padding: 0.3rem 0.4rem;
+		font-size: 0.75rem;
+		font-family: 'Cascadia Code', 'Fira Code', monospace;
+	}
+	.url-input:focus {
+		outline: 1px solid #e94560;
+		border-color: #e94560;
 	}
 
 	/* ── Main column ── */

@@ -1,8 +1,8 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { streamLLM, synthesizeSpeech, type PipelineConfig, type TTSProvider, type CartesiaOptions } from '../../../server/approach2';
+import { streamLLM, synthesizeSpeech, type PipelineConfig, type TTSProvider, type CartesiaOptions, type GoogleTTSOptions } from '../../../server/approach2';
 import { logConversation } from '../../../server/db';
-import { GROQ_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, CARTESIA_API_KEY, DEEPGRAM_API_KEY } from '$env/static/private';
+import { GROQ_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, CARTESIA_API_KEY, DEEPGRAM_API_KEY, GOOGLE_TTS_API_KEY } from '$env/static/private';
 
 export const POST: RequestHandler = async ({ request }) => {
 	const {
@@ -15,6 +15,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		systemPrompt,
 		cartesiaEmotionPrompt,
 		deepgramVoice,
+		googleTtsOptions,
+		qwen3Url,
 		sttProvider = 'unknown'
 	} = await request.json();
 	if (!text) throw error(400, 'Missing text');
@@ -52,7 +54,7 @@ export const POST: RequestHandler = async ({ request }) => {
 				let firstChunkTime = 0;
 				let fullText = '';
 				let sentenceBuf = '';
-				const ttsKeys = { deepgramKey: DEEPGRAM_API_KEY, openaiKey: OPENAI_API_KEY, cartesiaKey: CARTESIA_API_KEY };
+				const ttsKeys = { deepgramKey: DEEPGRAM_API_KEY, openaiKey: OPENAI_API_KEY, cartesiaKey: CARTESIA_API_KEY, googleTtsKey: GOOGLE_TTS_API_KEY, qwen3Url };
 				let ttsMs = 0;
 				let sentenceCount = 0;
 				const doTts = ttsProvider !== 'none';
@@ -71,7 +73,8 @@ export const POST: RequestHandler = async ({ request }) => {
 						ttsKeys,
 						text.trim(),
 						cartesiaOptions as CartesiaOptions | undefined,
-						deepgramVoice
+						deepgramVoice,
+						googleTtsOptions as GoogleTTSOptions | undefined
 					);
 					// But send audio in order via chain
 					sendChain = sendChain.then(async () => {
