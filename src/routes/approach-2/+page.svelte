@@ -20,7 +20,7 @@
 	let speechEndTime = 0;
 	let llmProvider = $state<'groq' | 'anthropic' | 'openai'>('groq');
 	let conversationHistory: { role: string; content: string }[] = [];
-	let sttProvider = $state<'deepgram-nova3' | 'cartesia' | 'openai' | 'browser'>('deepgram-nova3');
+	let sttProvider = $state<'deepgram-nova3' | 'cartesia' | 'openai' | 'browser'>('cartesia');
 	let ttsProvider = $state<'deepgram' | 'openai' | 'cartesia' | 'google' | 'qwen3' | 'browser'>('cartesia');
 	let qwen3Url = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('qwen3Url') || '' : '');
 	let browserRecognition: any = null;
